@@ -3,6 +3,7 @@ import pandas as pd
 from io import BytesIO
 import time
 import re
+import openpyxl
 
 def process_file(uploaded_file, selected_columns):
     columns_ordered = selected_columns.copy()
