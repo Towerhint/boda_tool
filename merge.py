@@ -61,20 +61,44 @@ def find_possible_columns(uploaded_file):
 
     return list(possible_columns)
 
-def export_file(df, selected_columns):
-    # Adjust the columns based on user selection and bank format
-    export_df = df[selected_columns]
-    
-    # Use a BytesIO object to store the Excel file in memory
+def export_file(df, selected_columns=None, mode=None):
+
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        export_df.to_excel(writer, index=False)
-    
-    # Set the file position to the beginning before returning
-    output.seek(0)
+
+    if mode == "combine":
+        # Adjust the columns based on user selection and bank format
+        export_df = df[selected_columns]
+        
+        # Use a BytesIO object to store the Excel file in memory
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            export_df.to_excel(writer, index=False)
+        
+        # Set the file position to the beginning before returning
+        output.seek(0)
+    elif mode == "separate":
+        # Provide download option
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False)
+        output.seek(0)
+
     
     return output
 
+def make_unique(column_names):
+    seen = {}
+    new_cols = []
+    for col in column_names:
+        if pd.isna(col):
+            col = 'Unnamed'
+        count = seen.get(col, 0)
+        if count:
+            new_col = f"{col}.{count}"
+            new_cols.append(new_col)
+        else:
+            new_cols.append(col)
+        seen[col] = count + 1
+    return new_cols
 
 def main():
     st.title("博达 - 工作表工具箱")
@@ -137,7 +161,7 @@ def main():
                     st.subheader("数据预览", divider=True)
                     st.dataframe(combined_df, use_container_width=True)
 
-                    output = export_file(combined_df, selected_columns)
+                    output = export_file(df=combined_df, selected_columns=selected_columns, mode="combine")
                     st.download_button(
                         label=f"下载文件",
                         data=output.getvalue(),
@@ -148,7 +172,66 @@ def main():
                     st.warning("没有成功处理任何文件。请检查上传的文件是否有效。")
 
     with tab2:
-        st.write("单表拆分工具")
+        uploaded_file = st.file_uploader("选择需要拆分的Excel表格", type="xlsx", accept_multiple_files=False)
+
+        if uploaded_file:
+            possible_columns = find_possible_columns(uploaded_file)
+            selected_column = st.selectbox("选择目标列", possible_columns)
+
+            if selected_column:
+                df = pd.read_excel(uploaded_file, sheet_name=0)
+
+                # Find where the selected_column is in the data
+                max_row_index = min(10, len(df))
+                data_start_row = None
+
+                for row_index in range(max_row_index):
+                    for col_index in range(df.shape[1]):
+                        cell_value = df.iloc[row_index, col_index]
+                        if cell_value == selected_column:
+                            data_start_row = row_index + 1
+                            break
+                    if data_start_row is not None:
+                        break
+
+                if data_start_row is None:
+                    st.error(f"未能在文件中找到列 '{selected_column}'")
+                else: 
+                    # Set the column names
+                    column_names = df.iloc[data_start_row - 1]
+                    
+                   # Ensure unique column names
+                    unique_columns = make_unique(column_names)
+
+                    # Assign unique column names to the DataFrame
+                    df.columns = unique_columns
+
+                    # Remove the header row (data_start_row - 1) to keep only the data
+                    df = df.iloc[data_start_row:].reset_index(drop=True)
+
+                    # Drop rows where all columns are NaN
+                    df = df.dropna(how='all')
+
+                    # Get options from the selected_column
+                    options = df[selected_column].dropna().unique().tolist()
+
+                    selected_option = st.selectbox("选择要输出的项", options)
+
+                    if selected_option:
+                        # Output all rows with that selected option
+                        result_df = df[df[selected_column] == selected_option]
+
+                        st.subheader("筛选结果", divider=True)
+                        st.dataframe(result_df, use_container_width=True)
+
+                        output = export_file(df=result_df, mode="separate")
+
+                        st.download_button(
+                            label=f"下载筛选结果",
+                            data=output.getvalue(),
+                            file_name=f"筛选结果_{selected_option}.xlsx",
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        )
 
     with tab3:
         st.write("数据稽核工具")
