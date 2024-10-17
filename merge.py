@@ -103,10 +103,10 @@ def make_unique(column_names):
 def main():
     st.title("博达 - 工作表工具箱")
 
-    tab1, tab2, tab3 = st.tabs(["多表合一", "单表拆分", "数据稽核"])
+    tab1, tab2, tab3, tab4 = st.tabs(["多表合一", "单表拆分", "数据稽核", "数据可视化"])
 
     with tab1:
-        uploaded_files = st.file_uploader("选择需要合并的Excel表格", type="xlsx", accept_multiple_files=True)
+        uploaded_files = st.file_uploader("选择需要合并的Excel表格", type=["xlsx", "xls"], accept_multiple_files=True)
         
         if uploaded_files:
 
@@ -150,9 +150,13 @@ def main():
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
 
+                    numeric_columns = combined_df.columns
+                    selected_numeric_column = st.selectbox("选择要计算总和的数值列", numeric_columns)
+
                     summary_data = {
                         "总处理时间": f"{total_time:.2f} 秒",
                         "合并后总行数": f"{len(combined_df)} 行",
+                        # f"{selected_numeric_column}总和": f"{combined_df[selected_numeric_column].sum():.2f}"
                     }
 
                     st.subheader("处理摘要", divider=True)
@@ -172,7 +176,9 @@ def main():
                     st.warning("没有成功处理任何文件。请检查上传的文件是否有效。")
 
     with tab2:
-        uploaded_file = st.file_uploader("选择需要拆分的Excel表格", type="xlsx", accept_multiple_files=False)
+        uploaded_file = st.file_uploader("选择需要拆分的Excel表格", type=["xlsx", "xls"], accept_multiple_files=False)
+
+        st.warning("请确保表格中所有列的列名都不相同", icon="🚨")
 
         if uploaded_file:
             possible_columns = find_possible_columns(uploaded_file)
@@ -236,6 +242,44 @@ def main():
     with tab3:
         st.write("数据稽核工具")
         st.write("coming soon")
+
+    with tab4:
+        uploaded_file = st.file_uploader("选择需要可视化的Excel表格", type=["xlsx", "xls"], accept_multiple_files=False)
+        
+        st.write("请输入表格的标题所在行数(例:标题在第5行, 则输入5)")
+
+        header_row = st.number_input("标题所在行数", min_value=1, max_value=10)
+
+        if uploaded_file and header_row:
+            # Load the uploaded Excel file into a pandas DataFrame
+            df = pd.read_excel(uploaded_file, engine='openpyxl', header=header_row-1)
+
+            # Display the data summary
+            st.header('概况')
+            st.write(df.describe())
+
+            # Display the DataFrame
+            st.header('预览')
+            st.dataframe(df)
+
+            # Display different chart options
+            st.header('图表')
+            chart_option = st.selectbox('Select chart type', ['Bar Chart', 'Line Chart', 'Area Chart'])
+
+            if chart_option == 'Bar Chart':
+                st.bar_chart(df)
+            elif chart_option == 'Line Chart':
+                st.line_chart(df)
+            elif chart_option == 'Area Chart':
+                st.area_chart(df)
+
+            # Additional tools for analysis
+            st.header('更多工具')
+            if st.checkbox('Show correlation matrix'):
+                st.write(df.corr())
+
+            if st.checkbox('Show missing values'):
+                st.write(df.isnull().sum())
 
 if __name__ == "__main__":
     main()
