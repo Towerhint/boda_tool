@@ -4,6 +4,7 @@ from io import BytesIO
 import time
 import re
 import openpyxl
+import numpy as np
 
 def process_file(uploaded_file, selected_columns):
     columns_ordered = selected_columns.copy()
@@ -39,6 +40,9 @@ def process_file(uploaded_file, selected_columns):
     new_df = new_df.reset_index(drop=True)
     new_df = new_df[~new_df['姓名'].apply(lambda x: str(x).isdigit())]
     new_df = new_df[columns_ordered]
+    
+    # Add file name column
+    new_df['文件名'] = uploaded_file.name
     
     return new_df
 
@@ -109,14 +113,21 @@ def main():
         uploaded_files = st.file_uploader("选择需要合并的Excel表格", type=["xlsx", "xls"], accept_multiple_files=True)
         
         if uploaded_files:
-
             possible_columns = find_possible_columns(uploaded_files[0])
             current_default = ['姓名', '身份证号', '应付工资']
 
             selected_columns = st.multiselect("选择要处理的列", possible_columns, default=current_default)
 
+            # Add checkbox for auto-merging
+            auto_merge = st.checkbox("自动合并相同身份证号人员(请确保身份证号列名正确)")
+            if auto_merge:
+                numerical_columns = st.multiselect("选择要自动合并的数值列(例如：应付工资)", selected_columns)
+
             process_button = st.button("处理文件")
-            
+
+            # add some space here
+            st.write("\n\n\n")
+
             if process_button:
                 total_files = len(uploaded_files)
                 progress_bar = st.progress(0)
@@ -149,21 +160,48 @@ def main():
                 
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
+                    st.write(combined_df)
 
-                    numeric_columns = combined_df.columns
-                    selected_numeric_column = st.selectbox("选择要计算总和的数值列", numeric_columns)
+                    if auto_merge:
+                        # Identify numerical columns                        
+                        agg_dict = {
+                            '姓名': 'first',  # Keep the first occurrence of 姓名
+                            **{col: 'first' for col in combined_df.columns if col not in numerical_columns and col not in ['姓名', '身份证号']},
+                            **{col: 'sum' for col in numerical_columns}
+                        }
+                        
+                        # Perform groupby and aggregation
+                        merged_df = combined_df.groupby('身份证号').agg(agg_dict)
+                        
+                        # Identify merged entries (only those with the same 身份证号)
+                        merged_entries = combined_df[combined_df.duplicated('身份证号', keep=False)][['姓名', '身份证号']].drop_duplicates()
+                        
+                        if not merged_entries.empty:
 
-                    summary_data = {
-                        "总处理时间": f"{total_time:.2f} 秒",
-                        "合并后总行数": f"{len(combined_df)} 行",
-                        # f"{selected_numeric_column}总和": f"{combined_df[selected_numeric_column].sum():.2f}"
-                    }
+                            with st.expander("合并人员总结", expanded=True):
+                                if not merged_entries.empty:
+                                    st.subheader("已合并的人员", divider=True)
+                                    st.dataframe(merged_entries, use_container_width=True)
+                                    st.info(f"共有 {len(merged_entries)} 人被合并")
+                                else:
+                                    st.info("没有需要合并的重复条目")
 
-                    st.subheader("处理摘要", divider=True)
-                    st.table(pd.DataFrame([summary_data]).T.rename_axis(None, axis=1))
+                        combined_df = merged_df.reset_index()
+                        # make 文件名 the last column
+                        combined_df.insert(len(combined_df.columns) - 1, '文件名', combined_df.pop('文件名'))
+                
 
-                    st.subheader("数据预览", divider=True)
-                    st.dataframe(combined_df, use_container_width=True)
+                    with st.expander("处理摘要和数据预览", expanded=True):
+                        summary_data = {
+                            "总处理时间": f"{total_time:.2f} 秒",
+                            "合并后总行数": f"{len(combined_df)} 行",
+                        }
+
+                        st.subheader("处理摘要", divider=True)
+                        st.table(pd.DataFrame([summary_data]).T.rename_axis(None, axis=1))
+
+                        st.subheader("数据预览", divider=True)
+                        st.dataframe(combined_df, use_container_width=True)
 
                     output = export_file(df=combined_df, selected_columns=selected_columns, mode="combine")
                     st.download_button(
@@ -240,19 +278,51 @@ def main():
                         )
 
     with tab3:
-        st.write("数据稽核工具")
-        st.write("coming soon")
+        uploaded_files_check = st.file_uploader("选择需要检查的Excel表格", type=["xlsx", "xls"], accept_multiple_files=True)
+
+        if uploaded_files_check:
+            possible_columns = ['姓名', '身份证号', '银行账号']
+
+            selected_columns = st.multiselect("选择要检查的列", possible_columns, default=possible_columns)
+
+            process_button = st.button("检查文件")
+
+            if process_button:
+                for file in uploaded_files_check:
+                    df = process_file(file, selected_columns.copy())
+
+                    df['检查结果'] = ''
+
+                    if '身份证号' in selected_columns:
+                        df.loc[df['身份证号'].apply(lambda x: len(str(x)) != 18), '检查结果'] += '错误：身份证号有误; '
+
+                    if '银行账号' in selected_columns:
+                        # 检查空格和长度
+                        df.loc[df['银行账号'].apply(lambda x: ' ' in str(x)), '检查结果'] += '错误：银行账号含空格，已去除; '
+                        df.loc[df['银行账号'].apply(lambda x: len(str(x)) <= 10), '检查结果'] += '错误: 银行账号少于或等于10位; '
+
+                        df['银行账号'] = df['银行账号'].apply(lambda x: str(x).replace(" ", ""))
+
+                    if '姓名' in df.columns:
+                        df.loc[df['姓名'].apply(lambda x: ' ' in str(x)), '检查结果'] += '错误：姓名含空格, 已去除; '
+                        df['姓名'] = df['姓名'].apply(lambda x: str(x).replace(" ", ""))
+
+                    df.loc[df['检查结果'] == '', '检查结果'] = '正确'
+
+                st.subheader(f"文件 '{file.name}' 的检查结果")
+                st.dataframe(df)          
+
 
     with tab4:
-        uploaded_file = st.file_uploader("选择需要可视化的Excel表格", type=["xlsx", "xls"], accept_multiple_files=False)
+        uploaded_file_viz = st.file_uploader("选择需要可视化的Excel表格", type=["xlsx", "xls"], accept_multiple_files=False)
         
         st.write("请输入表格的标题所在行数(例:标题在第5行, 则输入5)")
 
         header_row = st.number_input("标题所在行数", min_value=1, max_value=10)
 
-        if uploaded_file and header_row:
+        if uploaded_file_viz and header_row:
             # Load the uploaded Excel file into a pandas DataFrame
-            df = pd.read_excel(uploaded_file, engine='openpyxl', header=header_row-1)
+            df = pd.read_excel(uploaded_file_viz, engine='openpyxl', header=header_row-1)
 
             # Display the data summary
             st.header('概况')
