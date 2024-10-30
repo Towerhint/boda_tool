@@ -10,6 +10,7 @@ def process_file(uploaded_file, selected_columns):
     columns_ordered = selected_columns.copy()
 
     df = pd.read_excel(uploaded_file, sheet_name=0)
+    # st.write(df)
     columns_found = {}
 
     max_row_index = min(10, len(df))
@@ -35,8 +36,10 @@ def process_file(uploaded_file, selected_columns):
         columns_found[col_name] = data_series
 
     new_df = pd.DataFrame(columns_found)
-    
-    new_df = new_df.dropna()
+
+    # if '身份证号' or '姓名' is empty, remove the row
+    new_df = new_df[new_df['身份证号'].notna() & new_df['姓名'].notna()]
+
     new_df = new_df.reset_index(drop=True)
     new_df = new_df[~new_df['姓名'].apply(lambda x: str(x).isdigit())]
     new_df = new_df[columns_ordered]
@@ -113,16 +116,17 @@ def main():
         uploaded_files = st.file_uploader("选择需要合并的Excel表格", type=["xlsx", "xls"], accept_multiple_files=True)
         
         if uploaded_files:
-            possible_columns = find_possible_columns(uploaded_files[0])
-            current_default = ['姓名', '身份证号', '应付工资']
+            possible_columns = sorted(find_possible_columns(uploaded_files[0]))  # Sort the possible columns
+            current_default = ['姓名', '身份证号', '应付工资', '养老个人', '失业个人', '医保个人', '公积金个人', '补缴养老个人', '补缴失业个人', '补缴医保个人', '补缴公积金个人', '个税合计']
 
             selected_columns = st.multiselect("选择要处理的列", possible_columns, default=current_default)
 
             # Add checkbox for auto-merging
             auto_merge = st.checkbox("自动合并相同身份证号人员(请确保身份证号列名正确)")
             if auto_merge:
-                numerical_columns = st.multiselect("选择要自动合并的数值列(例如：应付工资)", selected_columns)
-
+                numerical_columns_candidate = [col for col in selected_columns if col not in ['姓名', '身份证号']]
+                numerical_columns = st.multiselect("选择要自动合并的数值列(例如：应付工资)", selected_columns, default=numerical_columns_candidate)
+            
             process_button = st.button("处理文件")
 
             # add some space here
@@ -143,6 +147,7 @@ def main():
 
                         # Process the file with the selected columns
                         df = process_file(file, selected_columns.copy())  # Pass a copy to avoid altering original
+
                         end_time = time.time()
                         process_time = end_time - start_time
                         total_time += process_time
@@ -160,7 +165,7 @@ def main():
                 
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
-                    st.write(combined_df)
+                    # st.write(combined_df)
 
                     if auto_merge:
                         # Identify numerical columns                        
@@ -195,6 +200,7 @@ def main():
                         summary_data = {
                             "总处理时间": f"{total_time:.2f} 秒",
                             "合并后总行数": f"{len(combined_df)} 行",
+                            "应付工资": f"{combined_df['应付工资'].sum()}"
                         }
 
                         st.subheader("处理摘要", divider=True)
