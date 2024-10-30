@@ -74,7 +74,8 @@ def export_file(df, selected_columns=None, mode=None):
 
     if mode == "combine":
         # Adjust the columns based on user selection and bank format
-        export_df = df[selected_columns]
+        export_columns = selected_columns + ['文件名']
+        export_df = df[export_columns]
         
         # Use a BytesIO object to store the Excel file in memory
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -317,7 +318,6 @@ def main():
 
                 st.subheader(f"文件 '{file.name}' 的检查结果")
                 st.dataframe(df)          
-
 
     with tab4:
         uploaded_file_viz = st.file_uploader("选择需要可视化的Excel表格", type=["xlsx", "xls"], accept_multiple_files=False)
